@@ -1,0 +1,29 @@
+diff -urNr keepassxc-2.7.1-orig/src/main.cpp keepassxc-2.7.1/src/main.cpp
+--- keepassxc-2.7.1-orig/src/main.cpp	2022-04-06 05:12:34.000000000 +0200
++++ keepassxc-2.7.1/src/main.cpp	2022-04-29 17:56:33.017403491 +0200
+@@ -43,8 +43,25 @@
+ #endif
+ #endif
+ 
++#ifdef Q_OS_LINUX
++void wayland_hacks()
++{
++    QByteArray currentDesktop = qgetenv("XDG_CURRENT_DESKTOP").toLower();
++    QByteArray sessionDesktop = qgetenv("XDG_SESSION_DESKTOP").toLower();
++    QByteArray sessionType = qgetenv("XDG_SESSION_TYPE").toLower();
++    if ((sessionType.contains("wayland") && qEnvironmentVariableIsEmpty("QT_QPA_PLATFORM")) && (currentDesktop.contains("gnome") || sessionDesktop.contains("gnome")))
++    {
++        qputenv("QT_QPA_PLATFORM", "xcb");
++    }
++}
++#endif
++
++
+ int main(int argc, char** argv)
+ {
++#ifdef Q_OS_LINUX
++    wayland_hacks();
++#endif
+     QT_REQUIRE_VERSION(argc, argv, QT_VERSION_STR)
+ 
+ #if QT_VERSION >= QT_VERSION_CHECK(5, 6, 0)
