@@ -2,8 +2,8 @@
 # EPEL7 not possible because libgcrypt version is 1.5
 
 Name:           keepassxc
-Version:        2.7.1
-Release:        3%{?dist}
+Version:        2.7.4
+Release:        1%{?dist}
 Summary:        Cross-platform password manager
 License:        Boost and BSD and CC0 and GPLv3 and LGPLv2 and LGPLv2+ and LGPLv3+ and Public Domain
 URL:            http://www.keepassxc.org/
@@ -25,14 +25,23 @@ Source0:        https://github.com/keepassxreboot/keepassxc/releases/download/%{
 # https://github.com/keepassxreboot/keepassxc/issues/5608
 # are reporting regression. I am resuming xcb.patch to all branches
 #
+# 27 July 2022 Germano Massullo's update: new Qt release
+# https://bodhi.fedoraproject.org/updates/FEDORA-2022-d1ac004bb1
+# reintroduced xcb patch for GNOME Wayland mentioning in the description the
+# problems keepassxc users experienced
 
-Patch0:         xcb.patch
+#Patch0:         xcb.patch
 
 
 BuildRequires:  botan2-devel
 BuildRequires:  cmake >= 3.1
 BuildRequires:  desktop-file-utils
-BuildRequires:  gcc-c++ >= 4.7
+%if %{defined el8}
+BuildRequires:  gcc-toolset-11-gcc-c++
+BuildRequires:  gcc-toolset-11-annobin-plugin-gcc
+%else
+BuildRequires:  gcc-c++
+%endif
 BuildRequires:  libappstream-glib
 BuildRequires:  libargon2-devel
 BuildRequires:  libcurl-devel
@@ -43,7 +52,11 @@ BuildRequires:  libusb1-devel
 BuildRequires:  libXi-devel
 BuildRequires:  libXtst-devel
 BuildRequires:  libyubikey-devel
+%if %{defined el8}
+BuildRequires:  minizip1.2-devel
+%else
 BuildRequires:  minizip-devel
+%endif
 BuildRequires:  pcsc-lite-devel
 BuildRequires:  qrencode-devel
 BuildRequires:  readline-devel
@@ -54,15 +67,17 @@ BuildRequires:  qt5-qttools-devel >= 5.2
 BuildRequires:  qt5-qtx11extras-devel
 BuildRequires:  ykpers-devel
 BuildRequires:  zlib-devel
-
-# For EL8 missing rubygem-asciidoctor read
-# https://bugzilla.redhat.com/show_bug.cgi?id=1859390
-# https://bugzilla.redhat.com/show_bug.cgi?id=1820896
-%if 0%{?fedora}
 BuildRequires:  rubygem-asciidoctor
-%endif
 
 # enforces on the user system, Qt version to be the same one used to build KeepassXC
+# This avoids "not a bug" bugreports like this one
+# https://bugzilla.redhat.com/show_bug.cgi?id=2068981
+# Moreover it is very important in case of mass rebuild of Qt+applications that
+# are dependent from Qt, because it happened (see following bugreport) that users experienced
+# that their system was not able to install a new Qt update due packaging bugs, but the system
+# was able to update keepassxc (which was built upon new Qt release), resulting in a
+# Qt - KeepassXC mismatch
+# https://bugzilla.redhat.com/show_bug.cgi?id=2111413
 %{?_qt5:Requires: %{_qt5}%{?_isa} = %{_qt5_version}}
 
 # KeePassXC bundles the ykcore code due to lack of support from Yubico and
@@ -94,41 +109,19 @@ information can be considered as quite safe.
 %autosetup -p1
 
 %build
-# This package fails to build with LTO due to undefined symbols.  LTO
-# was disabled in OpenSuSE as well, but with no real explanation why
-# beyond the undefined symbols.  It really shold be investigated further.
-# Disable LTO
-%define _lto_cflags %{nil}
-%if 0%{?fedora}
-%cmake \
-    -DWITH_TESTS=OFF \
-    -DWITH_XC_ALL=ON \
-    -DWITH_XC_KEESHARE_SECURE=ON \
-    -DWITH_XC_UPDATECHECK=OFF \
-    -DCMAKE_BUILD_TYPE=Release
+%if %{defined el8}
+. /opt/rh/gcc-toolset-11/enable
 %endif
 # -DWITH_XC_DOCS=OFF is needed on EL due missing rubygem-asciidoctor
 # For EL8 missing rubygem-asciidoctor read
 # https://bugzilla.redhat.com/show_bug.cgi?id=1859390
 # https://bugzilla.redhat.com/show_bug.cgi?id=1820896
-%if 0%{?el8}
 %cmake \
-    -DWITH_TESTS=OFF \
     -DWITH_XC_ALL=ON \
     -DWITH_XC_KEESHARE_SECURE=ON \
     -DWITH_XC_UPDATECHECK=OFF \
-    -DWITH_XC_DOCS=OFF \
+    -DWITH_XC_DOCS=ON \
     -DCMAKE_BUILD_TYPE=Release
-%endif
-%if 0%{?el9}
-%cmake \
-    -DWITH_TESTS=OFF \
-    -DWITH_XC_ALL=ON \
-    -DWITH_XC_KEESHARE_SECURE=ON \
-    -DWITH_XC_UPDATECHECK=OFF \
-    -DWITH_XC_DOCS=OFF \
-    -DCMAKE_BUILD_TYPE=Release
-%endif
 %cmake_build
  
 %install
@@ -158,7 +151,8 @@ install -D -m 644 -p x-keepassxc.desktop \
 %find_lang %{name} --with-qt
 
 %check
-%ctest
+# 'testcli' fails with "Subprocess aborted" in Koji and local mock
+%ctest --exclude-regex testcli
 desktop-file-validate %{buildroot}%{_datadir}/applications/org.%{name}.KeePassXC.desktop
 appstream-util validate-relax --nonet %{buildroot}%{_datadir}/metainfo/org.%{name}.KeePassXC.appdata.xml
 
@@ -176,16 +170,46 @@ appstream-util validate-relax --nonet %{buildroot}%{_datadir}/metainfo/org.%{nam
 %{_datadir}/mime/packages/*.xml
 %{_datadir}/icons/hicolor/*/*/*keepassxc*
 %{_libdir}/%{name}
-# Missing rubygem-asciidoctor in EL8 does not allow having documentation in EL8
-# Read https://bugzilla.redhat.com/show_bug.cgi?id=1859390
-%if 0%{?fedora}
 %{_mandir}/man1/%{name}-cli.1*
 %{_mandir}/man1/%{name}.1*
-%endif
 
 %changelog
+* Thu Sep 22 2022  Otto Liljalaakso <otto.liljalaakso@iki.fi> - 2.7.1-13
+- Re-enable LTO (rhbz#2127754)
+- Enable most tests (rhbz#2127757)
+
+* Wed Sep 21 2022 Jan Grulich <jgrulich@redhat.com> - 2.7.1-12
+- Rebuild (qt5)
+
+* Mon Jul 25 2022 Germano Massullo <germano.massullo@gmail.com> - 2.7.1-11
+- reverting Jan Grulich's removal of %%{?_qt5:Requires: %%{_qt5}%{?_isa} = %%{_qt5_version}}
+
+* Thu Jul 21 2022 Fedora Release Engineering <releng@fedoraproject.org> - 2.7.1-10
+- Rebuilt for https://fedoraproject.org/wiki/Fedora_37_Mass_Rebuild
+
+* Thu Jul 14 2022 Jan Grulich <jgrulich@redhat.com> - 2.7.1-9
+- Rebuild (qt5)
+
+* Wed Jul 13 2022 Germano Massullo <germano.massullo@gmail.com> - 2.7.1-8
+- enabled DWITH_XC_DOCS=ON on epel8
+
+* Mon Jul 11 2022 Carl George <carl@george.computer> - 2.7.1-7
+- Fix conditional logic to build on EPEL9
+- Enable man pages on EPEL8
+
+* Wed Jun 01 2022 Germano Massullo <germano.massullo@gmail.com> - 2.7.1-6
+- rebuilt due EPEL8 Qt new version
+
+* Wed May 25 2022 Mukundan Ragavan <nonamedotc@gmail.com> - 2.7.1-5
+- rebuilt
+
+* Tue May 17 2022 Jan Grulich <jgrulich@redhat.com> - 2.7.1-4
+- Rebuild (qt5)
+
 * Fri Apr 29 2022 Germano Massullo <germano.massullo@gmail.com> - 2.7.1-3
 - enabled Patch0:xcb.patch for all branches
+- adds gcc-toolset-11-toolchain for el8
+- replaces minizip-devel with minizip1.2-devel for el8
 
 * Mon Apr 11 2022 Germano Massullo <germano.massullo@gmail.com> - 2.7.1-2
 - replaces BuildRequires: minizip-compat-devel with BuildRequires: minizip-devel
